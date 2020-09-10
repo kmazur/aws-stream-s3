@@ -14,3 +14,6 @@ aws:
   accessKey: ---
   secretKey: ---
   bucketName: my-test-bucket-vin
+
+csv:
+  localTargetPath: ---

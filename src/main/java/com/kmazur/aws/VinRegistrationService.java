@@ -23,7 +23,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.stream.Stream;
 
 @Service
@@ -43,6 +42,9 @@ public class VinRegistrationService {
 
     @Value("${aws.bucketName}")
     private String bucketName;
+
+    @Value("${csv.localTargetPath}")
+    private String localTargetPath;
 
 
     @Async
@@ -67,44 +69,48 @@ public class VinRegistrationService {
 
     @Transactional(readOnly = true)
     public void getAllVinRegistrationDetailsInCSV(HttpServletResponse response) throws Exception {
-        String fileName = System.getProperty("user.home") + File.separator + "vgi-vin-registration-details.csv";
-        File filePath = new File(fileName);
-        filePath.createNewFile();
-        String contentType = context.getMimeType(filePath.getName());
+        String fileName = "vgi-vin-registration-details.csv";
+        String filePath = System.getProperty("user.home") + File.separator + fileName;
+        String localFilePath = localTargetPath + File.separator + fileName;
+
+        File localFile = new File(filePath);
+        localFile.createNewFile();
+        String contentType = context.getMimeType(localFile.getName());
         if (contentType == null) {
             contentType = "text/csv";
         }
 
         response.setContentType(contentType);
         response.addHeader(HttpHeaders.CONTENT_TYPE, "text/csv");
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + localFile + "\"");
         try (
             Stream<VinRegistrationEntity> vinRegistrationDetailsStream = vinRegistrationRepository.getAllRecords();
-            BufferedWriter fileWriter = Files.newBufferedWriter(Paths.get(fileName), StandardCharsets.UTF_8)
+            BufferedWriter fileWriter = Files.newBufferedWriter(Paths.get(filePath), StandardCharsets.UTF_8);
+            BufferedWriter localWriter = Files.newBufferedWriter(Paths.get(localFilePath), StandardCharsets.UTF_8)
         ) {
             PrintWriter out = response.getWriter();
 
             vinRegistrationDetailsStream
                 .forEach(detail -> {
                     System.out.println(detail);
-                    writeRegistration(fileWriter, out, detail);
+                    try {
+                        String csvRow = toCsvRow(detail);
+                        fileWriter.write(csvRow);
+                        fileWriter.write("\n");
+                        localWriter.write(csvRow);
+                        localWriter.write("\n");
+
+                        out.write(csvRow);
+                        out.write("\n");
+                        entityManager.detach(detail);//This is to make sure that GC in java cleans us from time to time so that there is no out of memory or any stack track exception
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
                 });
 
             out.flush();
         } catch (IOException ix) {
             throw new RuntimeException("There is an error while downloading user_details.csv", ix);
-        }
-    }
-
-    private void writeRegistration(BufferedWriter fileWriter, PrintWriter out, VinRegistrationEntity detail) {
-        try {
-            String csvRow = toCsvRow(detail);
-            fileWriter.write(csvRow);
-            out.write(csvRow);
-            out.write("\n");
-            entityManager.detach(detail);//This is to make sure that GC in java cleans us from time to time so that there is no out of memory or any stack track exception
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 
